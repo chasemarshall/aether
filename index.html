@@ -1,0 +1,643 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Search,
+  Settings,
+  Sun,
+  Moon,
+  Grid2x2,
+  Play,
+  Plus,
+  X,
+  PictureInPicture2,
+  TvMinimalPlay,
+} from "lucide-react";
+
+/**
+ * Apple x OpenAI inspired YouTube frontend
+ * Backend: Piped or Invidious (configurable)
+ *
+ * Drop this component into a Next.js page (e.g., app/page.tsx) or a React app.
+ * Styling uses Tailwind (no import needed in ChatGPT Canvas).
+ *
+ * Notes:
+ * - Embedding uses the backend instance's /embed/{id} endpoint for reliability.
+ * - If you prefer a native <video> player, toggle "Native player (experimental)" in Settings (may require CORS tweaks).
+ * - For self-hosted privacy, point the instance to your own Piped/Invidious deployment.
+ */
+
+// ---------- Utilities ----------
+const cls = (...xs) => xs.filter(Boolean).join(" ");
+
+function useLocalStorage(key, initial) {
+  const [v, setV] = useState(() => {
+    try {
+      const s = localStorage.getItem(key);
+      return s ? JSON.parse(s) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {}
+  }, [key, v]);
+  return [v, setV];
+}
+
+const numberFmt = new Intl.NumberFormat();
+const timeFmt = (s) => {
+  if (!s && s !== 0) return "";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  return [h, m, sec]
+    .map((n, i) => (i === 0 ? n : String(n).padStart(2, "0")))
+    .filter((x, i) => (i === 0 ? x > 0 : true))
+    .join(":");
+};
+
+const timeAgo = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  const map = [
+    [60, "s"],
+    [60, "m"],
+    [24, "h"],
+    [7, "d"],
+    [4.345, "w"],
+    [12, "mo"],
+  ];
+  let val = diff;
+  let unit = "s";
+  for (const [factor, u] of map) {
+    if (val < factor) break;
+    val /= factor;
+    unit = u;
+  }
+  const n = Math.max(1, Math.floor(val));
+  return `${n}${unit} ago`;
+};
+
+// ---------- API Client ----------
+const BACKENDS = {
+  piped: {
+    label: "Piped",
+    defaults: {
+      instance: "https://piped.video",
+    },
+    search: (base, q) => `${base}/api/v1/search?q=${encodeURIComponent(q)}&region=US&hl=en` ,
+    trending: (base) => `${base}/api/v1/trending?region=US`,
+    video: (base, id) => `${base}/api/v1/video/${id}`,
+    streams: (base, id) => `${base}/api/v1/streams/${id}`,
+    embed: (base, id) => `${base}/embed/${id}`,
+    mapSearchItem: (it) => {
+      // Piped returns mixed items; we want videos
+      if (it.type !== "video") return null;
+      const id = it.url?.split("v=")?.[1] || it.url?.split("/").pop() || it.id || it.videoId;
+      return {
+        id,
+        title: it.title,
+        author: it.uploaderName || it.author,
+        authorId: it.uploaderUrl || it.authorId,
+        views: it.views,
+        uploaded: it.uploaded || it.uploadedDate || it.uploadedAt,
+        duration: it.duration || it.lengthSeconds,
+        thumbnail: it.thumbnail,
+      };
+    },
+  },
+  invidious: {
+    label: "Invidious",
+    defaults: {
+      instance: "https://yewtu.be",
+    },
+    search: (base, q) => `${base}/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
+    trending: (base) => `${base}/api/v1/trending`,
+    video: (base, id) => `${base}/api/v1/videos/${id}`,
+    streams: (base, id) => `${base}/api/v1/videos/${id}`, // same endpoint contains formats
+    embed: (base, id) => `${base}/embed/${id}`,
+    mapSearchItem: (it) => {
+      const id = it.videoId || it.videoId || it.id;
+      const thumb = it.videoThumbnails?.[it.videoThumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+      return {
+        id,
+        title: it.title,
+        author: it.author,
+        authorId: it.authorId,
+        views: it.viewCount || it.views,
+        uploaded: it.publishedText ? undefined : it.published, // fallback
+        duration: it.lengthSeconds,
+        thumbnail: thumb,
+      };
+    },
+  },
+};
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+// ---------- UI ----------
+function AppShell({ children, theme, setTheme }) {
+  useEffect(() => {
+    if (theme === "system") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      document.documentElement.classList.toggle("dark", mq.matches);
+      const listener = (e) => document.documentElement.classList.toggle("dark", e.matches);
+      mq.addEventListener("change", listener);
+      return () => mq.removeEventListener("change", listener);
+    }
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
+
+  return (
+    <div className={cls(
+      "min-h-dvh text-slate-900 dark:text-slate-100",
+      "bg-[radial-gradient(1200px_800px_at_80%_-10%,rgba(139,92,246,0.18),transparent),radial-gradient(1000px_600px_at_-20%_10%,rgba(59,130,246,0.16),transparent)]",
+      "dark:bg-[radial-gradient(1200px_800px_at_80%_-10%,rgba(139,92,246,0.25),transparent),radial-gradient(1000px_600px_at_-20%_10%,rgba(59,130,246,0.22),transparent),linear-gradient(180deg,#0a0a0b,70%,#0f1115)]"
+    )}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Header({ onSearch, q, setQ, openSettings, theme, setTheme, onHome, onOpenMulti }) {
+  const inputRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "/") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        openSettings();
+      }
+      if (e.key === "Escape") inputRef.current?.blur();
+      if (e.key === "g" && !e.shiftKey) {
+        // g h to go Home, g m for multi
+        inputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openSettings]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <button onClick={onHome} className="group inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/15 backdrop-blur shadow-sm border border-black/5 dark:border-white/5 transition">
+        <div className="h-6 w-6 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 shadow-inner" />
+        <span className="font-semibold tracking-tight">Aethers</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400 group-hover:opacity-100 opacity-80">beta</span>
+      </button>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSearch(q);
+        }}
+        className="flex-1 flex items-center gap-2"
+      >
+        <div className="flex-1 flex items-center gap-2 bg-white/70 dark:bg-white/10 border border-black/5 dark:border-white/10 rounded-2xl px-3 py-2 shadow-sm backdrop-blur">
+          <Search className="h-5 w-5 opacity-70" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search videos"
+            className="w-full bg-transparent outline-none placeholder:text-slate-400 text-[15px]"
+          />
+          <kbd className="hidden sm:inline-flex text-[10px] px-1.5 py-0.5 rounded border border-slate-300/50 dark:border-white/10 text-slate-500">/</kbd>
+        </div>
+        <button
+          type="submit"
+          className="hidden sm:inline-flex items-center gap-2 rounded-2xl px-3 py-2 bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition shadow"
+        >
+          <Play className="h-4 w-4" />
+          Search
+        </button>
+      </form>
+
+      <button
+        onClick={onOpenMulti}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/15 backdrop-blur shadow-sm border border-black/5 dark:border-white/5 transition"
+        title="Open Multi-view"
+      >
+        <Grid2x2 className="h-5 w-5" />
+      </button>
+
+      <button
+        onClick={openSettings}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/15 backdrop-blur shadow-sm border border-black/5 dark:border-white/5 transition"
+      >
+        <Settings className="h-5 w-5" />
+        <span className="hidden sm:inline">Settings</span>
+      </button>
+
+      <ThemeToggle theme={theme} setTheme={setTheme} />
+    </div>
+  );
+}
+
+function ThemeToggle({ theme, setTheme }) {
+  const next = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+  const icon = theme === "dark" ? <Moon className="h-5 w-5" /> : theme === "light" ? <Sun className="h-5 w-5" /> : <Sun className="h-5 w-5" />;
+  return (
+    <button
+      onClick={() => setTheme(next)}
+      className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/15 backdrop-blur shadow-sm border border-black/5 dark:border-white/5 transition"
+      title={`Theme: ${theme} (click to ${next})`}
+    >
+      {icon}
+      <span className="hidden sm:inline capitalize">{theme}</span>
+    </button>
+  );
+}
+
+function SettingsPanel({ open, onClose, backend, setBackend, instance, setInstance, nativePlayer, setNativePlayer }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute right-4 top-4 w-[420px] max-w-[calc(100vw-2rem)] rounded-3xl border border-white/10 bg-white/75 dark:bg-white/10 text-slate-900 dark:text-slate-100 shadow-2xl">
+        <div className="p-4 flex items-center justify-between">
+          <div className="font-semibold">Settings</div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/40 dark:hover:bg-white/10">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-4 pt-0 space-y-4">
+          <div>
+            <label className="text-sm text-slate-600 dark:text-slate-300">Backend</label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              {Object.entries(BACKENDS).map(([k, v]) => (
+                <button
+                  key={k}
+                  onClick={() => {
+                    setBackend(k);
+                    setInstance(BACKENDS[k].defaults.instance);
+                  }}
+                  className={cls(
+                    "px-3 py-2 rounded-xl border",
+                    backend === k
+                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-transparent"
+                      : "bg-white/60 dark:bg-white/10 border-white/10 hover:bg-white/70 dark:hover:bg-white/15"
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-600 dark:text-slate-300">Instance URL</label>
+            <input
+              value={instance}
+              onChange={(e) => setInstance(e.target.value)}
+              placeholder="https://piped.yourdomain.tld"
+              className="mt-1 w-full px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-white/10 outline-none"
+            />
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Tip: Point this to your self-hosted instance to keep traffic private. Embeds use <code>/embed/ID</code>.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input id="nativePlayer" type="checkbox" checked={nativePlayer} onChange={(e) => setNativePlayer(e.target.checked)} />
+            <label htmlFor="nativePlayer" className="text-sm">Native player (experimental)</label>
+          </div>
+
+          <div className="rounded-2xl p-3 bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-400/20 text-amber-900 dark:text-amber-200 text-sm">
+            If you see CORS errors with the native player, use the default embed mode or proxy streams through your backend.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VideoGrid({ items, onOpen, onQueue }) {
+  if (!items) return null;
+  if (items.length === 0)
+    return <div className="text-slate-500 dark:text-slate-400 text-sm p-8">No videos found.</div>;
+
+  return (
+    <div className="grid gap-4 mt-4 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((v) => (
+        <VideoCard key={v.id} v={v} onOpen={() => onOpen(v)} onQueue={() => onQueue(v)} />
+      ))}
+    </div>
+  );
+}
+
+function VideoCard({ v, onOpen, onQueue }) {
+  const thumb = v.thumbnail || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`;
+  return (
+    <div className="group rounded-3xl overflow-hidden border border-white/10 bg-white/70 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 transition shadow-sm">
+      <div className="relative">
+        <img src={thumb} alt="thumbnail" className="w-full aspect-video object-cover" />
+        {v.duration ? (
+          <span className="absolute bottom-2 right-2 text-[11px] px-1.5 py-0.5 rounded bg-black/70 text-white">
+            {timeFmt(v.duration)}
+          </span>
+        ) : null}
+      </div>
+      <div className="p-3 space-y-2">
+        <div className="font-medium leading-snug line-clamp-2">{v.title}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+          <span className="truncate">{v.author}</span>
+          <span>•</span>
+          <span>{v.views ? `${numberFmt.format(v.views)} views` : null}</span>
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <button onClick={onOpen} className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition">
+            <TvMinimalPlay className="h-4 w-4" />
+            Watch
+          </button>
+          <button onClick={onQueue} className="px-3 py-2 rounded-xl bg-white/60 dark:bg-white/10 border border-white/10 hover:bg-white/70 dark:hover:bg-white/15">
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WatchView({ video, backend, instance, nativePlayer, onAddMulti }) {
+  if (!video) return null;
+  const embedSrc = `${instance}/embed/${video.id}`;
+  return (
+    <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)] gap-6">
+      <div>
+        <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black">
+          {nativePlayer ? (
+            <NativePlayer backend={backend} instance={instance} id={video.id} />
+          ) : (
+            <iframe
+              src={embedSrc}
+              className="w-full aspect-video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              title={video.title}
+            />
+          )}
+        </div>
+        <div className="mt-3">
+          <div className="text-xl font-semibold leading-tight">{video.title}</div>
+          <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-1">
+            <span className="truncate">{video.author}</span>
+            {video.views ? <><span>•</span><span>{numberFmt.format(video.views)} views</span></> : null}
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => onAddMulti(video)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/60 dark:bg-white/10 border border-white/10 hover:bg-white/70 dark:hover:bg-white/15">
+              <Grid2x2 className="h-4 w-4" /> Add to Multi-view
+            </button>
+            <a
+              href={embedSrc}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/60 dark:bg-white/10 border border-white/10 hover:bg-white/70 dark:hover:bg-white/15"
+            >
+              <PictureInPicture2 className="h-4 w-4" /> Pop-out
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="rounded-3xl border border-white/10 bg-white/60 dark:bg-white/5 p-4">
+          <div className="font-semibold mb-2">About</div>
+          <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
+            {video.description || "No description."}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NativePlayer({ backend, instance, id }) {
+  const ref = useRef(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setError("");
+      try {
+        if (backend === "piped") {
+          const data = await fetchJSON(`${instance}/api/v1/streams/${id}`);
+          const src = data.hls || data.h265?.url || data.h264?.url || data.audioStreams?.[0]?.url || data.videoStreams?.[0]?.url;
+          if (!src) throw new Error("No playable stream found");
+          if (!cancelled && ref.current) {
+            ref.current.src = src;
+            ref.current.play().catch(() => {});
+          }
+        } else {
+          // Invidious: fetch formats from /api/v1/videos/:id
+          const data = await fetchJSON(`${instance}/api/v1/videos/${id}`);
+          const fmt = data.formatStreams?.[0]?.url || data.hlsUrl || data.adaptiveFormats?.[0]?.url;
+          if (!fmt) throw new Error("No playable stream found");
+          if (!cancelled && ref.current) {
+            ref.current.src = fmt;
+            ref.current.play().catch(() => {});
+          }
+        }
+      } catch (e) {
+        setError(String(e.message || e));
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [backend, instance, id]);
+
+  return (
+    <div className="relative">
+      <video ref={ref} className="w-full aspect-video bg-black" controls playsInline />
+      {error ? (
+        <div className="absolute inset-0 grid place-items-center text-sm text-red-600 bg-black/30">
+          Native playback failed: {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MultiView({ open, onClose, items, instance }) {
+  if (!open) return null;
+  const cols = items.length <= 1 ? 1 : items.length <= 2 ? 2 : 2;
+  const rows = items.length <= 2 ? 1 : 2;
+  return (
+    <div className="fixed inset-0 z-40">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="absolute inset-6 rounded-3xl overflow-hidden border border-white/10 bg-slate-950">
+        <div className="absolute top-3 right-3 z-10 flex gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white">
+            Close
+          </button>
+        </div>
+        <div
+          className="h-full grid gap-2 p-2"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}
+        >
+          {items.map((v) => (
+            <iframe
+              key={v.id}
+              src={`${instance}/embed/${v.id}`}
+              className="w-full h-full rounded-xl border border-white/10"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              title={v.title}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AethersYouTubeFrontend() {
+  const [theme, setTheme] = useLocalStorage("aethers_theme", "system");
+  const [backend, setBackend] = useLocalStorage("aethers_backend", "piped");
+  const [instance, setInstance] = useLocalStorage("aethers_instance", BACKENDS.piped.defaults.instance);
+  const [nativePlayer, setNativePlayer] = useLocalStorage("aethers_native", false);
+
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState([]);
+  const [home, setHome] = useState([]);
+  const [current, setCurrent] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [multiOpen, setMultiOpen] = useState(false);
+  const [multiItems, setMultiItems] = useLocalStorage("aethers_multi", []);
+
+  const api = useMemo(() => BACKENDS[backend], [backend]);
+
+  async function doSearch(query) {
+    if (!query?.trim()) return;
+    setLoading(true); setError(""); setCurrent(null);
+    try {
+      const data = await fetchJSON(api.search(instance, query.trim()));
+      const vids = (Array.isArray(data) ? data : data?.items || [])
+        .map(api.mapSearchItem)
+        .filter(Boolean);
+      setResults(vids);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadHome() {
+    setLoading(true); setError("");
+    try {
+      const data = await fetchJSON(api.trending(instance));
+      const arr = Array.isArray(data) ? data : data?.items || [];
+      const vids = arr.map(api.mapSearchItem).filter(Boolean);
+      setHome(vids);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openVideo(v) {
+    setCurrent(v);
+  }
+
+  function queueVideo(v) {
+    setMultiItems((xs) => {
+      if (xs.find((i) => i.id === v.id)) return xs; // no dupes
+      const next = [...xs, v].slice(-4); // cap at 4
+      return next;
+    });
+  }
+
+  function onHome() {
+    setCurrent(null);
+    setResults([]);
+  }
+
+  useEffect(() => { loadHome(); }, [backend, instance]);
+
+  return (
+    <AppShell theme={theme} setTheme={setTheme}>
+      <Header
+        q={q}
+        setQ={setQ}
+        onSearch={doSearch}
+        openSettings={() => setSettingsOpen(true)}
+        theme={theme}
+        setTheme={setTheme}
+        onHome={onHome}
+        onOpenMulti={() => setMultiOpen(true)}
+      />
+
+      {error ? (
+        <div className="mt-4 rounded-2xl p-3 bg-red-50/70 dark:bg-red-500/10 border border-red-200/60 dark:border-red-400/20 text-red-900 dark:text-red-200 text-sm">
+          {error}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="mt-8 grid place-items-center text-slate-500 animate-pulse">
+          Loading…
+        </div>
+      ) : null}
+
+      {!current && results.length === 0 ? (
+        <section className="mt-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold tracking-tight">Trending</h2>
+            <div className="text-xs text-slate-500">Region: US</div>
+          </div>
+          <VideoGrid items={home} onOpen={openVideo} onQueue={queueVideo} />
+        </section>
+      ) : null}
+
+      {!current && results.length > 0 ? (
+        <section className="mt-6">
+          <h2 className="text-lg font-semibold tracking-tight">Results for "{q}"</h2>
+          <VideoGrid items={results} onOpen={openVideo} onQueue={queueVideo} />
+        </section>
+      ) : null}
+
+      {current ? (
+        <WatchView
+          video={current}
+          backend={backend}
+          instance={instance}
+          nativePlayer={nativePlayer}
+          onAddMulti={queueVideo}
+        />
+      ) : null}
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        backend={backend}
+        setBackend={setBackend}
+        instance={instance}
+        setInstance={setInstance}
+        nativePlayer={nativePlayer}
+        setNativePlayer={setNativePlayer}
+      />
+
+      <MultiView open={multiOpen} onClose={() => setMultiOpen(false)} items={multiItems} instance={instance} />
+
+      <footer className="mt-12 mb-4 text-center text-xs text-slate-500 dark:text-slate-400">
+        Built for privacy-friendly YouTube via {api.label}. Shortcuts: <kbd className="px-1 py-0.5 border rounded">/</kbd> focus search, <kbd className="px-1 py-0.5 border rounded">Ctrl/⌘K</kbd> settings.
+      </footer>
+    </AppShell>
+  );
+}
