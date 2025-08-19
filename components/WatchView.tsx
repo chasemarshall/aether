@@ -37,30 +37,52 @@ export function WatchView({
         // Build a best-first list of progressive muxed MP4s (native-friendly)
         const progressive: string[] = [];
 
+        // Helper to ensure we only keep absolute HTTP(S) urls. Some instances
+        // may return relative paths like "/watch?v=..." which break when
+        // assigned directly to the video element and result in 404s on our
+        // own origin.
+        const pickUrls = (list: any[]) =>
+          list
+            .map((s: any) => s?.url)
+            .filter(
+              (u: any): u is string =>
+                typeof u === "string" && /^https?:\/\//i.test(u)
+            );
+
         // Piped shape
         if (backend === "piped") {
           const v = Array.isArray(data?.videoStreams) ? data.videoStreams : [];
           // keep only muxed (videoOnly === false) and mp4
-          const muxedMp4 = v
-            .filter((s: any) => s && s.videoOnly === false)
-            .filter((s: any) => String(s?.mimeType || "").startsWith("video/"))
-            // prefer higher height first, then bitrate if available
-            .sort((a: any, b: any) => (b?.height ?? 0) - (a?.height ?? 0) || (b?.bitrate ?? 0) - (a?.bitrate ?? 0))
-            .map((s: any) => s.url);
+          const muxedMp4 = pickUrls(
+            v
+              .filter((s: any) => s && s.videoOnly === false)
+              .filter((s: any) =>
+                String(s?.mimeType || "").startsWith("video/")
+              )
+              // prefer higher height first, then bitrate if available
+              .sort(
+                (a: any, b: any) =>
+                  (b?.height ?? 0) - (a?.height ?? 0) ||
+                  (b?.bitrate ?? 0) - (a?.bitrate ?? 0)
+              )
+          );
           progressive.push(...muxedMp4);
 
           // Some instances expose formatStreams (similar to invidious)
           const fmt = Array.isArray(data?.formatStreams) ? data.formatStreams : [];
-          const fmtMp4 = fmt
-            .filter((f: any) => String(f?.type || "").startsWith("video/") || String(f?.mimeType || "").startsWith("video/"))
-            .map((f: any) => f.url);
+          const fmtMp4 = pickUrls(
+            fmt.filter((f: any) =>
+              String(f?.type || "").startsWith("video/") ||
+              String(f?.mimeType || "").startsWith("video/")
+            )
+          );
           progressive.push(...fmtMp4);
         } else {
           // Invidious shape
           const fmt = Array.isArray(data?.formatStreams) ? data.formatStreams : [];
-          const fmtMp4 = fmt
-            .filter((f: any) => String(f?.type || "").startsWith("video/"))
-            .map((f: any) => f.url);
+          const fmtMp4 = pickUrls(
+            fmt.filter((f: any) => String(f?.type || "").startsWith("video/"))
+          );
           progressive.push(...fmtMp4);
         }
 

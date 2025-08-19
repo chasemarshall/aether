@@ -32,6 +32,9 @@ export function NativeVideo({
   const dashInstanceRef = useRef<any>(null);
 
   const errorFiredRef = useRef(false);
+  const progressiveIndexRef = useRef(0);
+  const hlsTriedRef = useRef(false);
+  const dashTriedRef = useRef(false);
 
   const progressive = useMemo(
     () => (plan.progressive || []).filter(Boolean),
@@ -44,6 +47,9 @@ export function NativeVideo({
     if (!video) return;
 
     errorFiredRef.current = false;
+    progressiveIndexRef.current = 0;
+    hlsTriedRef.current = false;
+    dashTriedRef.current = false;
 
     // cleanup helpers
     const cleanup = () => {
@@ -75,12 +81,16 @@ export function NativeVideo({
     };
 
     const tryProgressive = () => {
-      if (progressive.length === 0) return false;
-      return attachSrc(progressive[0]!);
+      while (progressiveIndexRef.current < progressive.length) {
+        const src = progressive[progressiveIndexRef.current++]!;
+        if (attachSrc(src)) return true;
+      }
+      return false;
     };
 
     const tryHls = async () => {
-      if (!plan.hls) return false;
+      if (!plan.hls || hlsTriedRef.current) return false;
+      hlsTriedRef.current = true;
 
       // Native HLS on Safari
       if (isSafari()) return attachSrc(plan.hls);
@@ -116,7 +126,8 @@ export function NativeVideo({
     };
 
     const tryDash = async () => {
-      if (!plan.dash) return false;
+      if (!plan.dash || dashTriedRef.current) return false;
+      dashTriedRef.current = true;
       try {
         if (!dashLibRef.current) {
           const mod = await import("dashjs");
@@ -135,22 +146,15 @@ export function NativeVideo({
       }
     };
 
-    const onElError = () => {
-      if (!errorFiredRef.current) {
-        errorFiredRef.current = true;
-        onError("Native element failed");
-      }
-    };
-
-    video.addEventListener("error", onElError);
-
-    (async () => {
+    const load = async () => {
+      cleanup();
       let ok = tryProgressive();
       if (!ok) ok = await tryHls();
       if (!ok) ok = await tryDash();
       if (!ok && !errorFiredRef.current) {
         errorFiredRef.current = true;
         onError("No playable native format found");
+        return;
       }
 
       // polite autoplay (muted) if allowed
@@ -160,7 +164,16 @@ export function NativeVideo({
       } catch {
         /* ignore */
       }
-    })();
+    };
+
+    const onElError = async () => {
+      if (errorFiredRef.current) return;
+      await load();
+    };
+
+    video.addEventListener("error", onElError);
+
+    load();
 
     return () => {
       video.removeEventListener("error", onElError);
