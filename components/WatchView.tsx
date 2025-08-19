@@ -1,13 +1,20 @@
-// components/WatchView.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { BACKENDS, type BackendKey } from "@lib/backends";
 import { fetchJSON } from "@lib/fetcher";
 
 export function WatchView({
-  videoId, backend, embedBase, apiBase,
-}: { videoId: string | null; backend: BackendKey; embedBase: string; apiBase: string; }) {
+  videoId,
+  backend,
+  embedBase,
+  apiBase,
+}: {
+  videoId: string | null;
+  backend: BackendKey;
+  embedBase: string;
+  apiBase: string;
+}) {
   if (!videoId) return null;
   const [nativeSrc, setNativeSrc] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -15,10 +22,10 @@ export function WatchView({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setNativeSrc(null); setError("");
+      setNativeSrc(null);
+      setError("");
       try {
         if (backend === "piped") {
-          // /api/v1/streams/:id → prefer HLS; fallback to first video/audio stream
           const data = await fetchJSON<any>(BACKENDS.piped.streams(apiBase, videoId));
           const src =
             data?.hls ||
@@ -28,7 +35,6 @@ export function WatchView({
             null;
           if (!cancelled) setNativeSrc(src);
         } else {
-          // Invidious /api/v1/videos/:id → prefer hlsUrl; fallback to formatStreams/adaptiveFormats
           const data = await fetchJSON<any>(BACKENDS.invidious.streams(apiBase, videoId));
           const src =
             data?.hlsUrl ||
@@ -41,7 +47,9 @@ export function WatchView({
         if (!cancelled) setError(String(e?.message || e));
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [backend, apiBase, videoId]);
 
   const iframeSrc = BACKENDS[backend].embed(embedBase, videoId);
@@ -50,7 +58,12 @@ export function WatchView({
     <div className="mt-6">
       <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black">
         {nativeSrc ? (
-          <video src={nativeSrc} className="w-full aspect-video bg-black" controls playsInline />
+          <video
+            src={nativeSrc}
+            className="w-full aspect-video bg-black"
+            controls
+            playsInline
+          />
         ) : (
           <iframe
             src={iframeSrc}
