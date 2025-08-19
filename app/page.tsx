@@ -1,4 +1,22 @@
-import AppRoot from "../components/AppRoot";
+// app/page.tsx
+"use client";
+
+import AppRoot from "@/components/AppRoot";
+import Settings from "@/components/Settings";
+import CookieConsent from "@/components/CookieConsent";
+
 export default function Page() {
-  return <AppRoot />;
+  return (
+    <>
+      <CookieConsent />
+      <header className="max-w-6xl mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Aether</h1>
+        <div className="opacity-80 text-sm">beta</div>
+      </header>
+      <main className="max-w-6xl mx-auto px-4 pb-16">
+        <AppRoot />
+      </main>
+      <Settings />
+    </>
+  );
 }
