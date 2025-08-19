@@ -1,6 +1,4 @@
-// app/page.tsx
-import AppRoot from "./components/AppRoot.tsx"; // <- use a relative path
-
+import AppRoot from "../components/AppRoot";
 export default function Page() {
   return <AppRoot />;
 }
