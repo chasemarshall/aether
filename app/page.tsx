@@ -1,4 +1,3 @@
-// app/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -14,18 +13,35 @@ import { parseVideoId } from "@lib/parseVideoId";
 
 function useLocalStorage<T>(key: string, initial: T) {
   const [v, setV] = useState<T>(() => {
-    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) as T : initial; }
-    catch { return initial; }
+    try {
+      const s = localStorage.getItem(key);
+      return s ? (JSON.parse(s) as T) : initial;
+    } catch {
+      return initial;
+    }
   });
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }, [key, v]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {}
+  }, [key, v]);
   return [v, setV] as const;
 }
 
 export default function Page() {
-  const [theme, setTheme] = useLocalStorage<"light"|"dark"|"system">("aethers_theme", "system");
+  const [theme, setTheme] = useLocalStorage<"light" | "dark" | "system">(
+    "aethers_theme",
+    "system"
+  );
   const [backend, setBackend] = useLocalStorage<BackendKey>("yt_backend", "piped");
-  const [embedBase, setEmbedBase] = useLocalStorage("yt_embed", BACKENDS[backend].defaults.embedBase);
-  const [apiBase, setApiBase] = useLocalStorage("yt_api", BACKENDS[backend].defaults.apiBase);
+  const [embedBase, setEmbedBase] = useLocalStorage(
+    "yt_embed",
+    BACKENDS[backend].defaults.embedBase
+  );
+  const [apiBase, setApiBase] = useLocalStorage(
+    "yt_api",
+    BACKENDS[backend].defaults.apiBase
+  );
 
   const [q, setQ] = useLocalStorage("yt_query", "");
   const [videoId, setVideoId] = useLocalStorage<string | null>("yt_last_video", null);
@@ -39,11 +55,14 @@ export default function Page() {
   const api = useMemo(() => BACKENDS[backend], [backend]);
 
   async function loadTrending() {
-    setLoading(true); setErr("");
+    setLoading(true);
+    setErr("");
     try {
       const url = api.trending(apiBase, "US");
       const data = await fetchJSON<any[]>(url);
-      const list = (Array.isArray(data) ? data : []).map(api.mapSearchItem).filter(Boolean) as VideoItem[];
+      const list = (Array.isArray(data) ? data : [])
+        .map(api.mapSearchItem)
+        .filter(Boolean) as VideoItem[];
       setTrending(list);
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -54,14 +73,22 @@ export default function Page() {
 
   async function doSearch(query: string) {
     const id = parseVideoId(query);
-    if (id) { setVideoId(id); setResults([]); return; }
+    if (id) {
+      setVideoId(id);
+      setResults([]);
+      return;
+    }
     if (!query?.trim()) return;
 
-    setLoading(true); setErr(""); setVideoId(null);
+    setLoading(true);
+    setErr("");
+    setVideoId(null);
     try {
       const url = api.search(apiBase, query.trim());
       const data = await fetchJSON<any[]>(url);
-      const list = (Array.isArray(data) ? data : []).map(api.mapSearchItem).filter(Boolean) as VideoItem[];
+      const list = (Array.isArray(data) ? data : [])
+        .map(api.mapSearchItem)
+        .filter(Boolean) as VideoItem[];
       setResults(list);
     } catch (e: any) {
       setErr(String(e?.message || e));
@@ -70,11 +97,20 @@ export default function Page() {
     }
   }
 
-  useEffect(() => { loadTrending(); }, [backend, apiBase]);
+  useEffect(() => {
+    loadTrending();
+  }, [backend, apiBase]);
 
   return (
     <AethersShell theme={theme}>
-      <Header q={q} setQ={setQ} onSubmit={doSearch} openSettings={() => setSettingsOpen(true)} theme={theme} setTheme={setTheme} />
+      <Header
+        q={q}
+        setQ={setQ}
+        onSubmit={doSearch}
+        openSettings={() => setSettingsOpen(true)}
+        theme={theme}
+        setTheme={setTheme}
+      />
 
       {err ? (
         <div className="mt-4 rounded-2xl p-3 bg-red-50/70 dark:bg-red-500/10 border border-red-200/60 dark:border-red-400/20 text-red-900 dark:text-red-200 text-sm">
@@ -82,7 +118,9 @@ export default function Page() {
         </div>
       ) : null}
       {loading ? (
-        <div className="mt-8 grid place-items-center text-slate-500 animate-pulse">Loading…</div>
+        <div className="mt-8 grid place-items-center text-slate-500 animate-pulse">
+          Loading…
+        </div>
       ) : null}
 
       {!videoId && results.length === 0 ? (
@@ -102,13 +140,20 @@ export default function Page() {
 
       {!videoId && results.length > 0 ? (
         <section className="mt-6">
-          <h2 className="text-lg font-semibold tracking-tight">Results for “{q}”</h2>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Results for “{q}”
+          </h2>
           <VideoGrid items={results} onOpen={(v) => setVideoId(v.id)} />
         </section>
       ) : null}
 
       {videoId ? (
-        <WatchView videoId={videoId} backend={backend} embedBase={embedBase} apiBase={apiBase} />
+        <WatchView
+          videoId={videoId}
+          backend={backend}
+          embedBase={embedBase}
+          apiBase={apiBase}
+        />
       ) : null}
 
       <SettingsPanel
@@ -120,7 +165,7 @@ export default function Page() {
         setEmbedBase={setEmbedBase}
         apiBase={apiBase}
         setApiBase={setApiBase}
-        onSaved={() => { /* optional toast hook */ }}
+        onSaved={() => {}}
       />
       <Diagnostics
         open={diagOpen}
@@ -129,7 +174,8 @@ export default function Page() {
       />
 
       <footer className="mt-12 mb-4 text-center text-xs text-slate-500 dark:text-slate-400">
-        Built for privacy-friendly YouTube via {api.label}. Paste any watch link or 11-char ID.
+        Built for privacy-friendly YouTube via {api.label}. Paste any watch link
+        or 11-char ID.
       </footer>
     </AethersShell>
   );
