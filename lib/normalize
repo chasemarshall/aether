@@ -1,0 +1,18 @@
+export type PipedList<T = any> = T[] | { items?: T[] };
+
+export function asArray<T = any>(maybe: PipedList<T>): T[] {
+  if (Array.isArray(maybe)) return maybe;
+  if (maybe && Array.isArray((maybe as any).items)) return (maybe as any).items;
+  return [];
+}
+
+export function pickVideoIdFromUrl(url: string): string | null {
+  // supports "/watch?v=abc123" or full links, returns "abc123"
+  const u = url || "";
+  const idx = u.indexOf("?v=");
+  if (idx !== -1) return u.slice(idx + 3);
+  // handle "/watch?v=..."
+  const m = u.match(/[?&]v=([^&]+)/);
+  if (m?.[1]) return m[1];
+  return null;
+}
