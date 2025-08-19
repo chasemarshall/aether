@@ -7,10 +7,16 @@ import { SettingsPanel } from "@components/SettingsPanel";
 import { VideoGrid, type VideoItem } from "@components/VideoGrid";
 import { WatchView } from "@components/WatchView";
 import { Diagnostics } from "@components/Diagnostics";
+import { CookieConsent } from "@components/CookieConsent";
 import { BACKENDS, type BackendKey } from "@lib/backends";
 import { fetchFirstJSON } from "@lib/fetcher";
 import { parseVideoId } from "@lib/parseVideoId";
 
+function getCookie(name: string) {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+  return match ? decodeURIComponent(match[2]) : null;
+}
 function useLocalStorage<T>(key: string, initial: T) {
   const [v, setV] = useState<T>(() => {
     try {
@@ -27,20 +33,49 @@ function useLocalStorage<T>(key: string, initial: T) {
   }, [key, v]);
   return [v, setV] as const;
 }
+// Persist only if consented; otherwise keep in-memory
+function useConsentedLS<T>(key: string, initial: T, consent: boolean) {
+  const [v, setV] = useState<T>(initial);
+  useEffect(() => {
+    if (!consent) return;
+    try {
+      const s = localStorage.getItem(key);
+      setV(s ? (JSON.parse(s) as T) : initial);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consent]);
+  useEffect(() => {
+    if (!consent) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {}
+  }, [key, v, consent]);
+  return [v, setV] as const;
+}
 
 export default function Page() {
   const [theme, setTheme] = useLocalStorage<"light" | "dark" | "system">(
     "aethers_theme",
     "system"
   );
-  const [backend, setBackend] = useLocalStorage<BackendKey>("yt_backend", "piped");
-  const [embedBase, setEmbedBase] = useLocalStorage(
-    "yt_embed",
-    BACKENDS[backend].defaults.embedBase
+
+  const [consent, setConsent] = useState<boolean>(() => getCookie("aethers_consent") === "granted");
+
+  // Backend prefs respect cookie consent:
+  const [backend, setBackend] = useConsentedLS<BackendKey>(
+    "yt_backend",
+    "piped",
+    consent
   );
-  const [apiBase, setApiBase] = useLocalStorage(
+  const [embedBase, setEmbedBase] = useConsentedLS(
+    "yt_embed",
+    BACKENDS.piped.defaults.embedBase,
+    consent
+  );
+  const [apiBase, setApiBase] = useConsentedLS(
     "yt_api",
-    BACKENDS[backend].defaults.apiBase
+    BACKENDS.piped.defaults.apiBase,
+    consent
   );
 
   const [q, setQ] = useLocalStorage("yt_query", "");
@@ -171,6 +206,12 @@ export default function Page() {
         open={diagOpen}
         onClose={() => setDiagOpen(false)}
         url={BACKENDS[backend].trending(apiBase, "US")[0]}
+      />
+
+      {/* Cookie consent bar for backend prefs */}
+      <CookieConsent
+        onAccept={() => setConsent(true)}
+        onDecline={() => setConsent(false)}
       />
 
       <footer className="mt-12 mb-4 text-center text-xs text-slate-500 dark:text-slate-400">
