@@ -1,91 +1,60 @@
+// lib/backends.ts
 export type BackendKey = "piped" | "invidious";
 
-type BackendDef = {
-  name: string;
-  /** Where to open embeds like /watch?v=... */
+export type BackendDef = {
+  /** Human-readable name used by SettingsPanel */
+  label: string;
+
+  /** Build an embeddable video URL */
   embed: (base: string, id: string) => string;
-  /** Endpoints that return stream info for a video */
+
+  /** Endpoints to fetch stream metadata for a videoId */
   streams: (api: string, id: string) => string[];
-  /** Trending endpoint(s) */
-  trending: (api: string, opts: { region?: string }) => string[];
-  /** Search endpoint(s) */
+
+  /** Endpoints to fetch trending items */
+  trending: (api: string, opts?: { region?: string }) => string[];
+
+  /** Endpoints to search */
   search: (
     api: string,
     q: string,
-    opts: { region?: string; hl?: string }
+    opts?: { filter?: "videos" | "channels" | "playlists"; region?: string; hl?: string }
   ) => string[];
-
-  /** Default bases the UI can initialize with */
-  defaults: {
-    embedBase: string; // e.g. https://piped.withmilo.xyz
-    apiBase: string;   // e.g. https://piped.withmilo.xyz (we use /streams,/trending,/search here)
-    // Optional helpful suggestions to show in a selector
-    suggestApiBases?: string[];
-  };
 };
 
 export const BACKENDS: Record<BackendKey, BackendDef> = {
   piped: {
-    name: "Piped",
-    embed: (base, id) =>
-      `${base.replace(/\/$/, "")}/watch?v=${encodeURIComponent(id)}`,
-    // You asked to use plain `/streams/:id` (no /api/v1) on your instance.
-    streams: (api, id) => [
-      `${api.replace(/\/$/, "")}/streams/${encodeURIComponent(id)}`
-    ],
-    trending: (api, { region }) => [
-      `${api.replace(/\/$/, "")}/trending${
-        region ? `?region=${encodeURIComponent(region)}` : ""
-      }`
-    ],
-    // Piped search requires q and filter (e.g., filter=videos)
-    search: (api, q, { region, hl }) => {
-      const base = api.replace(/\/$/, "");
-      const params = new URLSearchParams();
-      params.set("q", q);
-      params.set("filter", "videos");
-      if (region) params.set("region", region);
-      if (hl) params.set("hl", hl);
-      return [`${base}/search?${params.toString()}`];
-    },
-    defaults: {
-      // Use your working instance:
-      embedBase: "https://piped.withmilo.xyz",
-      // IMPORTANT: using the same base here because your instance serves
-      // /streams, /trending, /search without /api/v1
-      apiBase: "https://piped.withmilo.xyz",
-      suggestApiBases: [
-        "https://piped.withmilo.xyz",
-        "https://piped.video",
-        "https://piped.lunar.icu"
-      ]
+    label: "Piped",
+    embed: (base, id) => `${base}/watch?v=${id}`,
+    streams: (api, id) => [`${api}/streams/${id}`],
+    trending: (api, opts) => [`${api}/trending?region=${encodeURIComponent(opts?.region ?? "US")}`],
+    search: (api, q, opts) => {
+      const params = new URLSearchParams({
+        q,
+        region: opts?.region ?? "US",
+        hl: opts?.hl ?? "en",
+        filter: opts?.filter ?? "videos"
+      });
+      return [`${api}/search?${params.toString()}`];
     }
   },
-
   invidious: {
-    name: "Invidious",
-    embed: (base, id) =>
-      `${base.replace(/\/$/, "")}/watch?v=${encodeURIComponent(id)}`,
+    label: "Invidious",
+    embed: (base, id) => `${base}/embed/${id}`,
     streams: (api, id) => [
-      `${api.replace(/\/$/, "")}/api/v1/videos/${encodeURIComponent(id)}`
+      `${api}/api/v1/videos/${id}`,
+      `${api}/api/v1/captions/${id}`
     ],
-    trending: (api, { region }) => [
-      `${api.replace(/\/$/, "")}/api/v1/trending${
-        region ? `?region=${encodeURIComponent(region)}` : ""
-      }`
+    trending: (api, opts) => [
+      `${api}/api/v1/trending?region=${encodeURIComponent(opts?.region ?? "US")}`
     ],
-    search: (api, q, { region, hl }) => {
-      const params = new URLSearchParams({ q });
-      if (region) params.set("region", region);
-      if (hl) params.set("hl", hl);
-      return [`${api.replace(/\/$/, "")}/api/v1/search?${params.toString()}`];
-    },
-    defaults: {
-      // Popular public instance for embeds
-      embedBase: "https://yewtu.be",
-      // Invidious API lives under /api/v1 on the same host
-      apiBase: "https://yewtu.be",
-      suggestApiBases: ["https://yewtu.be", "https://invidious.snopyta.org"]
+    search: (api, q, opts) => {
+      const params = new URLSearchParams({
+        q,
+        type: opts?.filter ?? "video",
+        region: opts?.region ?? "US"
+      });
+      return [`${api}/api/v1/search?${params.toString()}`];
     }
   }
 };
