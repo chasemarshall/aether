@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BACKENDS, type BackendKey } from "@lib/backends";
 import { fetchFirstJSON } from "@lib/fetcher";
-
-type Mode = "native" | "iframe";
+import { NativeVideo, type NativeSourcePlan } from "@components/NativeVideo";
 
 export function WatchView({
   videoId,
@@ -17,94 +16,90 @@ export function WatchView({
   embedBase: string;
   apiBase: string;
 }) {
-  const [nativeSrc, setNativeSrc] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<Mode>("native"); // <- track what we're showing
-  const demotedToIframe = useRef(false);
+  const [plan, setPlan] = useState<NativeSourcePlan | null>(null);
+  const iframeSrc = useMemo(
+    () => (videoId ? BACKENDS[backend].embed(embedBase, videoId) : ""),
+    [backend, embedBase, videoId]
+  );
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!videoId) return;
-      setNativeSrc(null);
       setError("");
-      setMode("native");
-      demotedToIframe.current = false;
+      setPlan(null);
 
       try {
-        const candidates = BACKENDS[backend].streams(apiBase, videoId);
-        const data = await fetchFirstJSON<any>(candidates);
+        const url = BACKENDS[backend].streams(apiBase, videoId)[0]; // your instance '/streams/:id'
+        const data = await fetchFirstJSON<any>([url]);
 
-        let src: string | null = null;
+        // Build a best-first list of progressive muxed MP4s (native-friendly)
+        const progressive: string[] = [];
+
+        // Piped shape
         if (backend === "piped") {
-          const muxed = Array.isArray(data?.videoStreams)
-            ? data.videoStreams.find(
-                (s: any) => s && s.videoOnly === false && /^video\//.test(s.mimeType ?? "")
-              )
-            : null;
-          src =
-            data?.hls ||
-            muxed?.url ||
-            data?.videoStreams?.find((s: any) => s && s.videoOnly === false)?.url ||
-            data?.formatStreams?.[0]?.url ||
-            data?.audioStreams?.[0]?.url ||
-            null;
+          const v = Array.isArray(data?.videoStreams) ? data.videoStreams : [];
+          // keep only muxed (videoOnly === false) and mp4
+          const muxedMp4 = v
+            .filter((s: any) => s && s.videoOnly === false)
+            .filter((s: any) => String(s?.mimeType || "").startsWith("video/"))
+            // prefer higher height first, then bitrate if available
+            .sort((a: any, b: any) => (b?.height ?? 0) - (a?.height ?? 0) || (b?.bitrate ?? 0) - (a?.bitrate ?? 0))
+            .map((s: any) => s.url);
+          progressive.push(...muxedMp4);
+
+          // Some instances expose formatStreams (similar to invidious)
+          const fmt = Array.isArray(data?.formatStreams) ? data.formatStreams : [];
+          const fmtMp4 = fmt
+            .filter((f: any) => String(f?.type || "").startsWith("video/") || String(f?.mimeType || "").startsWith("video/"))
+            .map((f: any) => f.url);
+          progressive.push(...fmtMp4);
         } else {
-          src =
-            data?.hlsUrl ||
-            data?.formatStreams?.find((f: any) => /^video\//.test(f?.type ?? ""))?.url ||
-            data?.formatStreams?.[0]?.url ||
-            data?.adaptiveFormats?.find((f: any) => /^video\//.test(f?.type ?? ""))?.url ||
-            data?.adaptiveFormats?.[0]?.url ||
-            null;
+          // Invidious shape
+          const fmt = Array.isArray(data?.formatStreams) ? data.formatStreams : [];
+          const fmtMp4 = fmt
+            .filter((f: any) => String(f?.type || "").startsWith("video/"))
+            .map((f: any) => f.url);
+          progressive.push(...fmtMp4);
         }
 
-        if (!cancelled) {
-          if (src) {
-            setNativeSrc(src);
-            setMode("native");
-          } else {
-            // nothing playable natively → use iframe right away
-            setMode("iframe");
-          }
-        }
+        // NOTE: DO NOT ever push audio-only url; that causes the “pause with slash” behavior.
+
+        const p: NativeSourcePlan = {
+          progressive: progressive.length ? progressive : undefined,
+          hls: backend === "piped" ? data?.hls ?? null : data?.hlsUrl ?? null,
+          dash: backend === "piped" ? data?.dash ?? null : data?.dashUrl ?? null,
+        };
+
+        if (!cancelled) setPlan(p);
       } catch (e: any) {
         if (!cancelled) {
           setError(String(e?.message || e));
-          setMode("iframe"); // fetch failed → just use iframe
+          setPlan(null);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [backend, apiBase, videoId]);
-
-  const iframeSrc = BACKENDS[backend].embed(embedBase, videoId ?? "");
-
-  function handleVideoError() {
-    if (!demotedToIframe.current) {
-      demotedToIframe.current = true;
-      setMode("iframe");           // switch UI to iframe
-      // keep a small warning, but NOT as an overlay
-      setError("Native playback failed; using embed instead.");
-    }
-  }
+  }, [apiBase, backend, videoId]);
 
   if (!videoId) return null;
+
+  const videoKey = `${backend}:${apiBase}:${videoId}`;
 
   return (
     <div className="mt-6">
       <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-black">
-        {mode === "native" && nativeSrc ? (
-          <video
-            src={nativeSrc}
-            className="w-full aspect-video bg-black"
-            controls
-            playsInline
-            onError={handleVideoError}
+        {plan ? (
+          <NativeVideo
+            videoKey={videoKey}
+            plan={plan}
+            onError={(msg) => setError(msg)}
           />
         ) : (
+          // While planning/failed, still show something (embed) so it plays
           <iframe
             src={iframeSrc}
             className="w-full aspect-video"
@@ -114,16 +109,15 @@ export function WatchView({
           />
         )}
 
-        {/* IMPORTANT: show overlay ONLY in native mode, so it never covers the iframe */}
-        {mode === "native" && error ? (
+        {/* Only show overlay if we are in native mode (i.e., plan exists) AND an error happened */}
+        {plan && error ? (
           <div className="absolute inset-0 grid place-items-center text-sm text-red-500 bg-black/30">
             {error}
           </div>
         ) : null}
       </div>
 
-      {/* If we're in iframe mode and have an error message, show it BELOW the player, not over it */}
-      {mode === "iframe" && error ? (
+      {!plan && error ? (
         <div className="mt-2 rounded-xl p-2 text-xs bg-amber-50/80 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-400/20 text-amber-900 dark:text-amber-200">
           {error}
         </div>
