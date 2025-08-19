@@ -8,7 +8,7 @@ import { VideoGrid, type VideoItem } from "@components/VideoGrid";
 import { WatchView } from "@components/WatchView";
 import { Diagnostics } from "@components/Diagnostics";
 import { BACKENDS, type BackendKey } from "@lib/backends";
-import { fetchJSON } from "@lib/fetcher";
+import { fetchFirstJSON } from "@lib/fetcher";
 import { parseVideoId } from "@lib/parseVideoId";
 
 function useLocalStorage<T>(key: string, initial: T) {
@@ -58,8 +58,8 @@ export default function Page() {
     setLoading(true);
     setErr("");
     try {
-      const url = api.trending(apiBase, "US");
-      const data = await fetchJSON<any[]>(url);
+      const urls = api.trending(apiBase, "US");
+      const data = await fetchFirstJSON<any[]>(urls);
       const list = (Array.isArray(data) ? data : [])
         .map(api.mapSearchItem)
         .filter(Boolean) as VideoItem[];
@@ -84,8 +84,8 @@ export default function Page() {
     setErr("");
     setVideoId(null);
     try {
-      const url = api.search(apiBase, query.trim());
-      const data = await fetchJSON<any[]>(url);
+      const urls = api.search(apiBase, query.trim());
+      const data = await fetchFirstJSON<any[]>(urls);
       const list = (Array.isArray(data) ? data : [])
         .map(api.mapSearchItem)
         .filter(Boolean) as VideoItem[];
@@ -170,7 +170,7 @@ export default function Page() {
       <Diagnostics
         open={diagOpen}
         onClose={() => setDiagOpen(false)}
-        url={api.trending(apiBase, "US")}
+        url={BACKENDS[backend].trending(apiBase, "US")[0]}
       />
 
       <footer className="mt-12 mb-4 text-center text-xs text-slate-500 dark:text-slate-400">
