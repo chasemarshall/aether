@@ -1,20 +1,27 @@
-// components/SettingsPanel.tsx
 "use client";
 import { X } from "lucide-react";
 import { BACKENDS, type BackendKey } from "@lib/backends";
 import { useEffect, useState } from "react";
 
 export function SettingsPanel({
-  open, onClose,
-  backend, setBackend,
-  embedBase, setEmbedBase,
-  apiBase, setApiBase,
+  open,
+  onClose,
+  backend,
+  setBackend,
+  embedBase,
+  setEmbedBase,
+  apiBase,
+  setApiBase,
   onSaved,
 }: {
-  open: boolean; onClose: () => void;
-  backend: BackendKey; setBackend: (b: BackendKey) => void;
-  embedBase: string; setEmbedBase: (s: string) => void;
-  apiBase: string; setApiBase: (s: string) => void;
+  open: boolean;
+  onClose: () => void;
+  backend: BackendKey;
+  setBackend: (b: BackendKey) => void;
+  embedBase: string;
+  setEmbedBase: (s: string) => void;
+  apiBase: string;
+  setApiBase: (s: string) => void;
   onSaved?: () => void;
 }) {
   const [b, setB] = useState<BackendKey>(backend);
@@ -22,7 +29,11 @@ export function SettingsPanel({
   const [api, setApi] = useState(apiBase);
 
   useEffect(() => {
-    if (open) { setB(backend); setEmbed(embedBase); setApi(apiBase); }
+    if (open) {
+      setB(backend);
+      setEmbed(embedBase);
+      setApi(apiBase);
+    }
   }, [open, backend, embedBase, apiBase]);
 
   if (!open) return null;
@@ -73,22 +84,41 @@ export function SettingsPanel({
 
           <div>
             <label className="text-sm text-slate-600 dark:text-slate-300">Embed base (frontend)</label>
-            <input value={embed} onChange={(e) => setEmbed(e.target.value)} placeholder="https://piped.video" className="mt-1 w-full px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-white/10 outline-none" />
+            <input
+              value={embed}
+              onChange={(e) => setEmbed(e.target.value)}
+              placeholder="https://piped.video"
+              className="mt-1 w-full px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-white/10 outline-none"
+            />
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Example: <code>https://piped.video</code> or <code>https://yewtu.be</code>
+            </p>
           </div>
 
           <div>
             <label className="text-sm text-slate-600 dark:text-slate-300">API base (backend)</label>
-            <input value={api} onChange={(e) => setApi(e.target.value)} placeholder="https://pipedapi.kavin.rocks" className="mt-1 w-full px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-white/10 outline-none" />
+            <input
+              value={api}
+              onChange={(e) => setApi(e.target.value)}
+              placeholder="https://pipedapi.kavin.rocks"
+              className="mt-1 w-full px-3 py-2 rounded-xl bg-white/70 dark:bg-white/10 border border-white/10 outline-none"
+            />
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              For Piped, use the <code>pipedapi.*</code> host. For Invidious, embed & API can be the same.
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2">
-            <button onClick={save} className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition shadow">
+            <button
+              onClick={save}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition shadow"
+            >
               Save
             </button>
           </div>
 
           <div className="rounded-2xl p-3 bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-400/20 text-amber-900 dark:text-amber-200 text-sm">
-            If CORS blocks streams, use the embed player (it always works). API base should be the <b>pipedapi.*</b> host.
+            If CORS blocks streams, the player will fall back to an embedded page so playback still works.
           </div>
         </div>
       </div>
