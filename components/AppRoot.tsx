@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { NativeVideo, type NativeSourcePlan } from ".../NativeVideo.tsx";
+import { useEffect, useMemo, useState } from "react";
+import { NativeVideo, type NativeSourcePlan } from "./NativeVideo"; // <-- note: "./", no dots party, no .tsx
+
 
 // If you have your api helpers (BACKENDS/api) already, import and use them here.
 // import { api } from "@/lib/api"; // <- your existing helpers
