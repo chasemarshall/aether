@@ -1,4 +1,3 @@
-// lib/backends.ts
 export type BackendKey = "invidious" | "piped";
 
 const env = {
@@ -12,12 +11,10 @@ export const BACKENDS: Record<
   {
     label: string;
     defaults: { embedBase: string; apiBase: string };
-    // Build URLs
     search: (api: string, q: string) => string;
     trending: (api: string, region?: string) => string;
     streams: (api: string, id: string) => string;
     embed: (embedBase: string, id: string) => string;
-    // Mapping helpers to normalize items
     mapSearchItem: (raw: any) => null | {
       id: string;
       title: string;
@@ -31,12 +28,15 @@ export const BACKENDS: Record<
   piped: {
     label: "Piped",
     defaults: { embedBase: env.pipedEmbed, apiBase: env.pipedApi },
-    search: (api, q) => `${api.replace(/\/$/, "")}/api/v1/search?q=${encodeURIComponent(q)}&region=US&hl=en&type=video`,
-    trending: (api, region = "US") => `${api.replace(/\/$/, "")}/api/v1/trending?region=${region}`,
-    streams: (api, id) => `${api.replace(/\/$/, "")}/api/v1/streams/${id}`,
-    embed: (embedBase, id) => `${embedBase.replace(/\/$/, "")}/watch?v=${id}`,
+    search: (api, q) =>
+      `${api.replace(/\/$/, "")}/api/v1/search?q=${encodeURIComponent(q)}&region=US&hl=en&type=video`,
+    trending: (api, region = "US") =>
+      `${api.replace(/\/$/, "")}/api/v1/trending?region=${region}`,
+    streams: (api, id) =>
+      `${api.replace(/\/$/, "")}/api/v1/streams/${id}`,
+    embed: (embedBase, id) =>
+      `${embedBase.replace(/\/$/, "")}/watch?v=${id}`,
     mapSearchItem: (it) => {
-      // Piped search returns { type?, url?, title, uploaderName, views, duration, thumbnail }
       if (it?.type && it.type !== "video") return null;
       const id =
         it?.url?.split("v=")?.[1] ||
@@ -57,15 +57,21 @@ export const BACKENDS: Record<
   invidious: {
     label: "Invidious",
     defaults: { embedBase: env.invidious, apiBase: env.invidious },
-    search: (api, q) => `${api.replace(/\/$/, "")}/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
-    trending: (api, region = "US") => `${api.replace(/\/$/, "")}/api/v1/trending?region=${region}`,
-    streams: (api, id) => `${api.replace(/\/$/, "")}/api/v1/videos/${id}`,
-    embed: (embedBase, id) => `${embedBase.replace(/\/$/, "")}/watch?v=${id}`,
+    search: (api, q) =>
+      `${api.replace(/\/$/, "")}/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
+    trending: (api, region = "US") =>
+      `${api.replace(/\/$/, "")}/api/v1/trending?region=${region}`,
+    streams: (api, id) =>
+      `${api.replace(/\/$/, "")}/api/v1/videos/${id}`,
+    embed: (embedBase, id) =>
+      `${embedBase.replace(/\/$/, "")}/watch?v=${id}`,
     mapSearchItem: (it) => {
       const id = it?.videoId || it?.id;
       if (!id) return null;
       const thumbs = it?.videoThumbnails || [];
-      const thumb = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+      const thumb =
+        thumbs[thumbs.length - 1]?.url ||
+        `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
       return {
         id,
         title: it.title,
