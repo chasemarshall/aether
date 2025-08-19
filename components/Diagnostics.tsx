@@ -1,8 +1,15 @@
-// components/Diagnostics.tsx
 "use client";
 import { useEffect, useState } from "react";
 
-export function Diagnostics({ open, onClose, url }: { open: boolean; onClose: () => void; url: string; }) {
+export function Diagnostics({
+  open,
+  onClose,
+  url,
+}: {
+  open: boolean;
+  onClose: () => void;
+  url: string;
+}) {
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
@@ -13,7 +20,11 @@ export function Diagnostics({ open, onClose, url }: { open: boolean; onClose: ()
         const r = await fetch(url, { mode: "cors", credentials: "omit" });
         const text = await r.text();
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${text.slice(0, 120)}…`);
-        try { JSON.parse(text); } catch { throw new Error("Response is not JSON."); }
+        try {
+          JSON.parse(text);
+        } catch {
+          throw new Error("Response is not JSON.");
+        }
         setMsg("Success ✓");
       } catch (e: any) {
         setMsg(`Failed: ${e?.message || e}`);
