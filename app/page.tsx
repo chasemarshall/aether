@@ -1,9 +1,9 @@
 // app/page.tsx
 "use client";
 
-import AppRoot from "@/components/AppRoot";
-import Settings from "@/components/Settings";
-import CookieConsent from "@/components/CookieConsent";
+import AppRoot from "./components/AppRoot";
+import Settings from "./components/Settings";
+import CookieConsent from "./components/CookieConsent";
 
 export default function Page() {
   return (
