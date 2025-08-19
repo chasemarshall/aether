@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BACKENDS, type BackendKey } from "@lib/backends";
-import { fetchJSON } from "@lib/fetcher";
+import { fetchFirstJSON } from "@lib/fetcher";
 
 export function WatchView({
   videoId,
@@ -25,24 +25,22 @@ export function WatchView({
       setNativeSrc(null);
       setError("");
       try {
-        if (backend === "piped") {
-          const data = await fetchJSON<any>(BACKENDS.piped.streams(apiBase, videoId));
-          const src =
-            data?.hls ||
-            data?.videoStreams?.find((s: any) => !s.videoOnly)?.url ||
-            data?.audioStreams?.[0]?.url ||
-            data?.videoStreams?.[0]?.url ||
-            null;
-          if (!cancelled) setNativeSrc(src);
-        } else {
-          const data = await fetchJSON<any>(BACKENDS.invidious.streams(apiBase, videoId));
-          const src =
-            data?.hlsUrl ||
-            data?.formatStreams?.[0]?.url ||
-            data?.adaptiveFormats?.[0]?.url ||
-            null;
-          if (!cancelled) setNativeSrc(src);
-        }
+        const candidates = BACKENDS[backend].streams(apiBase, videoId);
+        const data = await fetchFirstJSON<any>(candidates);
+
+        const src =
+          backend === "piped"
+            ? data?.hls ||
+              data?.videoStreams?.find((s: any) => !s.videoOnly)?.url ||
+              data?.audioStreams?.[0]?.url ||
+              data?.videoStreams?.[0]?.url ||
+              null
+            : data?.hlsUrl ||
+              data?.formatStreams?.[0]?.url ||
+              data?.adaptiveFormats?.[0]?.url ||
+              null;
+
+        if (!cancelled) setNativeSrc(src);
       } catch (e: any) {
         if (!cancelled) setError(String(e?.message || e));
       }
