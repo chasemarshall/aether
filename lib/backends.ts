@@ -11,43 +11,37 @@ export const BACKENDS: Record<
   {
     label: string;
     defaults: { embedBase: string; apiBase: string };
-    search: (api: string, q: string) => string[];      // note: arrays (candidates)
+    // Arrays support multiple candidates; for Piped we now put *non-API* first and ONLY.
+    search: (api: string, q: string) => string[];
     trending: (api: string, region?: string) => string[];
     streams: (api: string, id: string) => string[];
     embed: (embedBase: string, id: string) => string;
     mapSearchItem: (raw: any) => null | {
-      id: string; title: string; author?: string; views?: number; duration?: number; thumbnail?: string;
+      id: string;
+      title: string;
+      author?: string;
+      views?: number;
+      duration?: number;
+      thumbnail?: string;
     };
   }
 > = {
   piped: {
     label: "Piped",
     defaults: { embedBase: env.pipedEmbed, apiBase: env.pipedApi },
-    // Some instances require filter=videos (and no /api/v1). Try both shapes:
+    // Your instance requires `filter=videos` and *no* `/api/v1` prefix.
     search: (api, q) => {
       const base = api.replace(/\/$/, "");
-      const withFilter = `q=${encodeURIComponent(q)}&filter=videos&region=US&hl=en`;
-      const withType   = `q=${encodeURIComponent(q)}&type=video&region=US&hl=en`;
-      return [
-        `${base}/api/v1/search?${withFilter}`,
-        `${base}/search?${withFilter}`,
-        `${base}/api/v1/search?${withType}`,
-        `${base}/search?${withType}`,
-      ];
+      const qs = `q=${encodeURIComponent(q)}&filter=videos&region=US&hl=en`;
+      return [`${base}/search?${qs}`];
     },
     trending: (api, region = "US") => {
       const base = api.replace(/\/$/, "");
-      return [
-        `${base}/api/v1/trending?region=${region}`,
-        `${base}/trending?region=${region}`,
-      ];
+      return [`${base}/trending?region=${region}`];
     },
     streams: (api, id) => {
       const base = api.replace(/\/$/, "");
-      return [
-        `${base}/api/v1/streams/${id}`,
-        `${base}/streams/${id}`,
-      ];
+      return [`${base}/streams/${id}`]; // <- only /streams/
     },
     embed: (embedBase, id) => `${embedBase.replace(/\/$/, "")}/watch?v=${id}`,
     mapSearchItem: (it) => {
@@ -86,7 +80,9 @@ export const BACKENDS: Record<
       const id = it?.videoId || it?.id;
       if (!id) return null;
       const thumbs = it?.videoThumbnails || [];
-      const thumb = thumbs[thumbs.length - 1]?.url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+      const thumb =
+        thumbs[thumbs.length - 1]?.url ||
+        `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
       return {
         id,
         title: it.title,
