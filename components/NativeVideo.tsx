@@ -1,19 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Hls from "hls.js";
 import dashjs from "dashjs";
 
 export type NativeSourcePlan = {
-  // Progressive MP4 urls (muxed). First wins.
   progressive?: string[];
-  // HLS manifest (m3u8)
   hls?: string | null;
-  // DASH manifest (mpd)
   dash?: string | null;
 };
 
-/** tiny UA helpers */
+/** Safari UA helper */
 const isSafari = () =>
   typeof navigator !== "undefined" &&
   /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -25,7 +22,6 @@ export function NativeVideo({
 }: {
   plan: NativeSourcePlan;
   onError: (msg: string) => void;
-  /** force a full reset when video changes */
   videoKey: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -51,67 +47,54 @@ export function NativeVideo({
       dashRef.current = null;
     }
 
-    const tryProgressive = async () => {
+    const tryProgressive = () => {
       if (progressive.length === 0) return false;
-      // just take the first (we already sorted best-first)
       video.src = progressive[0]!;
       return true;
     };
 
-    const tryHls = async () => {
+    const tryHls = () => {
       if (!plan.hls) return false;
 
-      // Safari plays HLS natively
       if (isSafari()) {
         video.src = plan.hls!;
         return true;
       }
 
-      // Other browsers: use hls.js when supported
       if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true
-        });
+        const hls = new Hls({ enableWorker: true });
         hlsRef.current = hls;
         hls.attachMedia(video);
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
           hls.loadSource(plan.hls!);
         });
         hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (data?.fatal) {
-            onError(`HLS fatal: ${data?.type ?? "unknown"}`);
-          }
+          if (data?.fatal) onError(`HLS fatal: ${data?.type ?? "unknown"}`);
         });
         return true;
       }
 
-      // Fallback try direct (some Chromium builds can do it)
       try {
         video.src = plan.hls!;
         return true;
       } catch {
-        /* ignore */
+        return false;
       }
-      return false;
     };
 
-    const tryDash = async () => {
+    const tryDash = () => {
       if (!plan.dash) return false;
       const player = dashjs.MediaPlayer().create();
       dashRef.current = player;
+      // no lowLatencyEnabled here to satisfy types across versions
       player.initialize(video, plan.dash!, false);
-      player.updateSettings({
-        streaming: { lowLatencyEnabled: true }
-      });
       return true;
     };
 
     (async () => {
-      // ORDER: Progressive MP4 > HLS > DASH
-      let ok = await tryProgressive();
-      if (!ok) ok = await tryHls();
-      if (!ok) ok = await tryDash();
+      let ok = tryProgressive();
+      if (!ok) ok = tryHls();
+      if (!ok) ok = tryDash();
       if (!ok) onError("No playable native format found");
     })();
 
@@ -138,7 +121,7 @@ export function NativeVideo({
       playsInline
       preload="metadata"
       crossOrigin="anonymous"
-      onError={() => onError("Native element failed")} // surface element-level failures
+      onError={() => onError("Native element failed")}
     />
   );
 }
