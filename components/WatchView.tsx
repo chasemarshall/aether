@@ -34,20 +34,26 @@ export function WatchView({
         const url = BACKENDS[backend].streams(apiBase, videoId)[0]; // your instance '/streams/:id'
         const data = await fetchFirstJSON<any>([url]);
 
+        // Helper to normalize URLs. Some instances may return relative paths
+        // like "/watch?v=..." which break when assigned directly to the
+        // video element and result in 404s on our own origin. When a proxyUrl
+        // is provided we prefix relative paths with it.
+        const makeAbsolute = (u: any) => {
+          if (typeof u !== "string") return null;
+          if (/^https?:\/\//i.test(u)) return u;
+          if (data?.proxyUrl && u.startsWith("/")) {
+            return `${data.proxyUrl.replace(/\/$/, "")}${u}`;
+          }
+          return null;
+        };
+
         // Build a best-first list of progressive muxed MP4s (native-friendly)
         const progressive: string[] = [];
 
-        // Helper to ensure we only keep absolute HTTP(S) urls. Some instances
-        // may return relative paths like "/watch?v=..." which break when
-        // assigned directly to the video element and result in 404s on our
-        // own origin.
         const pickUrls = (list: any[]) =>
           list
-            .map((s: any) => s?.url)
-            .filter(
-              (u: any): u is string =>
-                typeof u === "string" && /^https?:\/\//i.test(u)
-            );
+            .map((s: any) => makeAbsolute(s?.url))
+            .filter((u: any): u is string => typeof u === "string" && !!u);
 
         // Piped shape
         if (backend === "piped") {
@@ -90,8 +96,12 @@ export function WatchView({
 
         const p: NativeSourcePlan = {
           progressive: progressive.length ? progressive : undefined,
-          hls: backend === "piped" ? data?.hls ?? null : data?.hlsUrl ?? null,
-          dash: backend === "piped" ? data?.dash ?? null : data?.dashUrl ?? null,
+          hls: makeAbsolute(
+            backend === "piped" ? data?.hls ?? null : data?.hlsUrl ?? null
+          ),
+          dash: makeAbsolute(
+            backend === "piped" ? data?.dash ?? null : data?.dashUrl ?? null
+          ),
         };
 
         if (!cancelled) setPlan(p);
