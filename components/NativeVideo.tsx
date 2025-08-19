@@ -1,19 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import Hls from "hls.js";
-import dashjs from "dashjs";
 
 export type NativeSourcePlan = {
-  /** direct MP4s (from Piped videoStreams where videoOnly=false) */
-  progressive?: string[];
-  /** HLS manifest URL (Invidious hlsUrl or Piped livestreams) */
-  hls?: string | null;
-  /** DASH manifest URL (Invidious dashUrl) */
-  dash?: string | null;
+  progressive?: string[]; // direct MP4s
+  hls?: string | null;    // HLS manifest URL
+  dash?: string | null;   // DASH manifest URL
 };
 
-/** Safari-ish check (Chrome on iOS also reports Safari; this is “good enough” for MSE-less HLS fallback) */
+/** Loose Safari check for native HLS */
 const isSafari = () =>
   typeof navigator !== "undefined" &&
   /safari/i.test(navigator.userAgent) &&
@@ -29,13 +24,18 @@ export function NativeVideo({
   videoKey: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const dashRef = useRef<dashjs.MediaPlayerClass | null>(null);
+
+  // hold dynamic libs + instances in refs so we can clean them
+  const hlsLibRef = useRef<any>(null);
+  const hlsInstanceRef = useRef<any>(null);
+  const dashLibRef = useRef<any>(null);
+  const dashInstanceRef = useRef<any>(null);
+
   const errorFiredRef = useRef(false);
 
-  /** stable progressive list */
   const progressive = useMemo(
     () => (plan.progressive || []).filter(Boolean),
+    // join makes the dep stable without re-running for same list
     [plan.progressive?.join("|")]
   );
 
@@ -43,157 +43,141 @@ export function NativeVideo({
     const video = videoRef.current;
     if (!video) return;
 
-    // Reset one-shot error flag for this mount
     errorFiredRef.current = false;
 
-    // Clean any existing engines
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    if (dashRef.current) {
-      dashRef.current.reset();
-      dashRef.current = null;
-    }
+    // cleanup helpers
+    const cleanup = () => {
+      try {
+        if (hlsInstanceRef.current) {
+          hlsInstanceRef.current.destroy();
+          hlsInstanceRef.current = null;
+        }
+        if (dashInstanceRef.current) {
+          dashInstanceRef.current.reset?.();
+          dashInstanceRef.current = null;
+        }
+        video.pause?.();
+        video.removeAttribute("src");
+        video.load?.();
+      } catch {
+        /* noop */
+      }
+    };
 
-    // Helpful console breadcrumbs
-    const log = (...args: any[]) => console.debug("[NativeVideo]", ...args);
-
-    const attachVideoSrc = (src: string) => {
+    const attachSrc = (src: string) => {
       try {
         video.src = src;
-        video.load(); // important for Safari/WebKit
+        video.load(); // important for WebKit
         return true;
-      } catch (e) {
+      } catch {
         return false;
       }
     };
 
     const tryProgressive = () => {
       if (progressive.length === 0) return false;
-      log("trying progressive", progressive[0]);
-      return attachVideoSrc(progressive[0]!);
+      return attachSrc(progressive[0]!);
     };
 
-    const tryHls = () => {
+    const tryHls = async () => {
       if (!plan.hls) return false;
 
       // Native HLS on Safari
-      if (isSafari()) {
-        log("trying native HLS (Safari)", plan.hls);
-        return attachVideoSrc(plan.hls);
-      }
+      if (isSafari()) return attachSrc(plan.hls);
 
-      // MSE HLS
-      if (Hls.isSupported()) {
-        log("trying hls.js", plan.hls);
-        const hls = new Hls({ enableWorker: true });
-        hlsRef.current = hls;
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-          hls.loadSource(plan.hls!);
-        });
-        hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (data?.fatal && !errorFiredRef.current) {
-            errorFiredRef.current = true;
-            onError(`HLS fatal: ${data?.type ?? "unknown"}`);
-          }
-        });
-        return true;
-      }
-
-      // Last-ditch: some browsers support HLS natively without our UA check
-      return attachVideoSrc(plan.hls);
-    };
-
-    const tryDash = () => {
-      if (!plan.dash) return false;
-      log("trying dash.js", plan.dash);
-      const player = dashjs.MediaPlayer().create();
-      dashRef.current = player;
-
-      // Keep settings minimal & compatible across dash.js versions.
-      player.updateSettings({
-        streaming: {
-          // correct key is lowLatencyMode (not lowLatencyEnabled)
-          // use it only if your streams are LL-DASH; otherwise it's harmless.
-          lowLatencyMode: true
-        }
-      } as any);
-
-      player.initialize(video, plan.dash!, false);
-      return true;
-    };
-
-    // Attach transient listeners to avoid premature “failed” overlays.
-    const onLoaded = () => log("loadedmetadata");
-    const onCanPlay = async () => {
-      log("canplay");
-      // optional auto-play attempt (muted allows autoplay policies)
+      // MSE HLS via hls.js (dynamic import to avoid SSR “self”)
       try {
-        video.muted = true;
-        await video.play().catch(() => void 0);
+        if (!hlsLibRef.current) {
+          const mod = await import("hls.js");
+          hlsLibRef.current = mod.default || mod;
+        }
+        const Hls = hlsLibRef.current;
+        if (Hls?.isSupported?.()) {
+          const hls = new Hls({ enableWorker: true });
+          hlsInstanceRef.current = hls;
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            hls.loadSource(plan.hls!);
+          });
+          hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
+            if (data?.fatal && !errorFiredRef.current) {
+              errorFiredRef.current = true;
+              onError(`HLS fatal: ${data?.type ?? "unknown"}`);
+            }
+          });
+          return true;
+        }
       } catch {
-        /* ignore */
+        // fall through to “last ditch” attach
+      }
+
+      // Some browsers support HLS natively
+      return attachSrc(plan.hls);
+    };
+
+    const tryDash = async () => {
+      if (!plan.dash) return false;
+      try {
+        if (!dashLibRef.current) {
+          const mod = await import("dashjs");
+          dashLibRef.current = mod.default || mod;
+        }
+        const dashjs = dashLibRef.current;
+        const player = dashjs.MediaPlayer().create();
+        dashInstanceRef.current = player;
+
+        // minimal, cross-version-safe settings
+        player.updateSettings?.({ streaming: { lowLatencyMode: true } } as any);
+        player.initialize(video, plan.dash!, false);
+        return true;
+      } catch {
+        return false;
       }
     };
+
     const onElError = () => {
-      // Some browsers emit non-fatal MediaError events during switching;
-      // only surface once per mount to avoid spamming.
       if (!errorFiredRef.current) {
         errorFiredRef.current = true;
         onError("Native element failed");
       }
     };
 
-    video.addEventListener("loadedmetadata", onLoaded);
-    video.addEventListener("canplay", onCanPlay);
     video.addEventListener("error", onElError);
 
-    // Try sources in order: progressive → HLS → DASH
-    let ok = tryProgressive();
-    if (!ok) ok = tryHls();
-    if (!ok) ok = tryDash();
-    if (!ok && !errorFiredRef.current) {
-      errorFiredRef.current = true;
-      onError("No playable native format found");
-    }
+    (async () => {
+      let ok = tryProgressive();
+      if (!ok) ok = await tryHls();
+      if (!ok) ok = await tryDash();
+      if (!ok && !errorFiredRef.current) {
+        errorFiredRef.current = true;
+        onError("No playable native format found");
+      }
+
+      // polite autoplay (muted) if allowed
+      try {
+        video.muted = true;
+        await video.play().catch(() => void 0);
+      } catch {
+        /* ignore */
+      }
+    })();
 
     return () => {
-      video.removeEventListener("loadedmetadata", onLoaded);
-      video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("error", onElError);
-
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-      if (dashRef.current) {
-        dashRef.current.reset();
-        dashRef.current = null;
-      }
-      try {
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
-      } catch {
-        /* noop */
-      }
+      cleanup();
     };
-    // Re-init when key changes or plan URLs change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // re-run when sources or key change
   }, [videoKey, progressive.join("|"), plan.hls ?? "", plan.dash ?? ""]);
 
   return (
     <video
       key={videoKey}
       ref={videoRef}
-      className="w-full aspect-video rounded-2xl bg-black shadow-[0_0_40px_rgba(0,0,0,0.35)]"
+      className="w-full aspect-video rounded-2xl bg-black"
       controls
       playsInline
       preload="metadata"
       crossOrigin="anonymous"
-      // don’t surface generic error here; we handle via listener to avoid duplicate overlays
     />
   );
 }
