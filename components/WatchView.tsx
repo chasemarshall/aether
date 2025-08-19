@@ -35,14 +35,16 @@ export function WatchView({
         let src: string | null = null;
         if (backend === "piped") {
           const muxed = Array.isArray(data?.videoStreams)
-            ? data.videoStreams.find((s: any) => s && s.videoOnly === false && /^video\//.test(s.mimeType ?? ""))
+            ? data.videoStreams.find(
+                (s: any) => s && s.videoOnly === false && /^video\//.test(s.mimeType ?? "")
+              )
             : null;
           src =
             data?.hls ||
             muxed?.url ||
             data?.videoStreams?.find((s: any) => s && s.videoOnly === false)?.url ||
-            data?.formatStreams?.[0]?.url ||              // some instances expose this
-            data?.audioStreams?.[0]?.url ||               // last resort (audio-only)
+            data?.formatStreams?.[0]?.url || // occasionally present
+            data?.audioStreams?.[0]?.url ||  // last resort
             null;
         } else {
           // Invidious
@@ -67,11 +69,10 @@ export function WatchView({
 
   const iframeSrc = BACKENDS[backend].embed(embedBase, videoId ?? "");
 
-  // If native <video> errors or is blocked, flip to iframe automatically
   function handleVideoError() {
     if (!triedIframeRef.current) {
       triedIframeRef.current = true;
-      setNativeSrc(null); // forces iframe render
+      setNativeSrc(null); // force iframe fallback
       setError("Native playback failed");
     }
   }
@@ -87,7 +88,6 @@ export function WatchView({
             className="w-full aspect-video bg-black"
             controls
             playsInline
-            // Safari/quieter errors → ensure we downgrade on any error:
             onError={handleVideoError}
           />
         ) : (
@@ -99,7 +99,6 @@ export function WatchView({
             title={videoId}
           />
         )}
-
         {error ? (
           <div className="absolute inset-0 grid place-items-center text-sm text-red-500 bg-black/30">
             {error}
