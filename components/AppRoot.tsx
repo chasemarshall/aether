@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { NativeVideo, type NativeSourcePlan } from "@/components/NativeVideo";
+import { NativeVideo, type NativeSourcePlan } from "./NativeVideo";
 
 export default function AppRoot() {
   const [error, setError] = useState("");
